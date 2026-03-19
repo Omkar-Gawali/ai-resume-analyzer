@@ -1,6 +1,6 @@
-// server/controllers/resumeController.js
+// backend/controllers/resumeController.js
 import axios from "axios";
-import path from "path";
+import fs from "fs";
 import Resume from "../models/Resume.js";
 
 // @desc    Upload resume and trigger analysis
@@ -18,19 +18,31 @@ export const uploadResume = async (req, res) => {
   });
 
   try {
-    // ✅ Fix: convert Windows backslashes to forward slashes
-    const absolutePath = path.resolve(req.file.path).replace(/\\/g, "/");
+    // ✅ Read file → convert to base64 (works across separate servers)
+    const fileBuffer = fs.readFileSync(req.file.path);
+    const base64File = fileBuffer.toString("base64");
 
-    console.log("Sending path to ML:", absolutePath); // debug log
+    console.log("Sending file to ML service:", req.file.originalname);
 
     const mlResponse = await axios.post(
       `${process.env.ML_SERVICE_URL}/analyze`,
-      { file_path: absolutePath },
+      {
+        file_content: base64File,
+        file_name: req.file.originalname,
+      },
+      { timeout: 120000 }, // 120s for cold starts
     );
 
     resume.analysisResult = mlResponse.data;
     resume.status = "analyzed";
     await resume.save();
+
+    // Clean up uploaded file after successful analysis
+    try {
+      fs.unlinkSync(req.file.path);
+    } catch {
+      // non-critical — ignore cleanup errors
+    }
 
     res.status(201).json({
       message: "Resume analyzed successfully",

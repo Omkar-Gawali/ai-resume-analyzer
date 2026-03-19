@@ -1,18 +1,19 @@
-# ml-service/app.py
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
+import base64
+import tempfile
+import os
 from utils import (
     extract_text_from_pdf,
     extract_skills,
     match_jobs,
     calculate_score,
-    generate_suggestions
+    generate_suggestions,
 )
 
 app = FastAPI(title="Resume Analyzer ML Service")
 
-# Allow requests from Node.js backend
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -20,69 +21,67 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-
-# ── Request Schema ───────────────────────────────────────────────
+# ── Updated request schema ──────────────────────────────────────
 class ResumeRequest(BaseModel):
-    file_path: str
+    file_content: str   # base64 encoded PDF
+    file_name:    str   # original filename
 
-
-# ── Routes ───────────────────────────────────────────────────────
+# ── Routes ─────────────────────────────────────────────────────
 @app.get("/")
 def root():
     return {"message": "ML Service is running ✅"}
-
 
 @app.get("/health")
 def health():
     return {"status": "ok"}
 
-
 @app.post("/analyze")
 def analyze_resume(data: ResumeRequest):
-    """
-    Main endpoint called by Node.js backend.
-    Accepts file path → returns full analysis.
-    """
+    tmp_path = None
     try:
-        # Step 1: Extract text from PDF
-        raw_text = extract_text_from_pdf(data.file_path)
+        # Decode base64 → write to temp file
+        file_bytes = base64.b64decode(data.file_content)
+
+        with tempfile.NamedTemporaryFile(
+            delete=False,
+            suffix=".pdf",
+            prefix="resume_"
+        ) as tmp:
+            tmp.write(file_bytes)
+            tmp_path = tmp.name
+
+        # Extract text from temp file
+        raw_text = extract_text_from_pdf(tmp_path)
 
         if not raw_text or len(raw_text.strip()) < 50:
             raise HTTPException(
                 status_code=400,
-                detail="Could not extract text. Make sure the PDF is not scanned/image-based."
+                detail="Could not extract text. Make sure PDF is not scanned/image-based."
             )
 
-        # Step 2: Extract skills
-        extracted_skills = extract_skills(raw_text)
-
-        # Step 3: Match to job roles
-        matched_jobs = match_jobs(extracted_skills)
-
-        # Step 4: Calculate score
-        score = calculate_score(raw_text, extracted_skills)
-
-        # Step 5: Generate suggestions
-        suggestions = generate_suggestions(raw_text, extracted_skills, matched_jobs)
-
-        # Step 6: Get missing skills from top job
-        missing_skills = []
-        if matched_jobs:
-            missing_skills = matched_jobs[0].get("missing_required", [])
-
-        # Step 7: Job recommendation titles only (for DB storage)
+        # Run analysis
+        extracted_skills  = extract_skills(raw_text)
+        matched_jobs      = match_jobs(extracted_skills)
+        score             = calculate_score(raw_text, extracted_skills)
+        suggestions       = generate_suggestions(raw_text, extracted_skills, matched_jobs)
+        missing_skills    = matched_jobs[0].get("missing_required", []) if matched_jobs else []
         job_recommendations = [job["title"] for job in matched_jobs]
 
         return {
-            "score": score,
-            "extractedSkills": extracted_skills,
-            "missingSkills": missing_skills,
+            "score":              score,
+            "extractedSkills":    extracted_skills,
+            "missingSkills":      missing_skills,
             "jobRecommendations": job_recommendations,
-            "suggestions": suggestions,
-            "detailedJobMatches": matched_jobs  # full match details for frontend
+            "suggestions":        suggestions,
+            "detailedJobMatches": matched_jobs,
         }
 
     except HTTPException:
         raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+
+    finally:
+        # Always clean up temp file
+        if tmp_path and os.path.exists(tmp_path):
+            os.remove(tmp_path)
