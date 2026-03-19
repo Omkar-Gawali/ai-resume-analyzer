@@ -1,7 +1,12 @@
-// backend/controllers/resumeController.js
 import axios from "axios";
 import fs from "fs";
+import path from "path";
+import { fileURLToPath } from "url";
 import Resume from "../models/Resume.js";
+
+// Fix __dirname for ES modules
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
 
 // @desc    Upload resume and trigger analysis
 // @route   POST /api/resume/upload
@@ -18,11 +23,34 @@ export const uploadResume = async (req, res) => {
   });
 
   try {
-    // ✅ Read file → convert to base64 (works across separate servers)
-    const fileBuffer = fs.readFileSync(req.file.path);
+    // DEBUG — add these 4 lines
+    console.log("=== UPLOAD DEBUG ===");
+    console.log("req.file:", req.file);
+    console.log("process.cwd():", process.cwd());
+    console.log(
+      "__dirname equivalent:",
+      path.join(path.dirname(fileURLToPath(import.meta.url))),
+    );
+
+    // ✅ Build absolute path — works on both Windows and Linux/Render
+    const absolutePath = path.isAbsolute(req.file.path)
+      ? req.file.path
+      : path.join(process.cwd(), req.file.path);
+
+    console.log("Resolved absolutePath:", absolutePath);
+    console.log("File exists:", fs.existsSync(absolutePath));
+    console.log("====================");
+
+    if (!fs.existsSync(absolutePath)) {
+      throw new Error(`File not found at: ${absolutePath}`);
+    }
+
+    // Read and encode to base64
+    const fileBuffer = fs.readFileSync(absolutePath);
     const base64File = fileBuffer.toString("base64");
 
-    console.log("Sending file to ML service:", req.file.originalname);
+    console.log("File size (bytes):", fileBuffer.length);
+    console.log("Sending to ML service:", req.file.originalname);
 
     const mlResponse = await axios.post(
       `${process.env.ML_SERVICE_URL}/analyze`,
@@ -30,18 +58,18 @@ export const uploadResume = async (req, res) => {
         file_content: base64File,
         file_name: req.file.originalname,
       },
-      { timeout: 120000 }, // 120s for cold starts
+      { timeout: 120000 },
     );
 
     resume.analysisResult = mlResponse.data;
     resume.status = "analyzed";
     await resume.save();
 
-    // Clean up uploaded file after successful analysis
+    // Clean up temp file
     try {
-      fs.unlinkSync(req.file.path);
+      fs.unlinkSync(absolutePath);
     } catch {
-      // non-critical — ignore cleanup errors
+      /* ignore */
     }
 
     res.status(201).json({
@@ -52,10 +80,10 @@ export const uploadResume = async (req, res) => {
     resume.status = "failed";
     await resume.save();
 
-    console.log("ML Error:", error.response?.data || error.message);
+    console.log("Upload Error:", error.response?.data || error.message);
 
     res.status(500).json({
-      message: "ML analysis failed",
+      message: error.response?.data?.detail || error.message,
       error: error.response?.data?.detail || error.message,
     });
   }
