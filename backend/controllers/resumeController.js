@@ -2,6 +2,7 @@ import axios from "axios";
 import fs from "fs";
 import path from "path";
 import { fileURLToPath } from "url";
+import FormData from "form-data";
 import Resume from "../models/Resume.js";
 
 // Fix __dirname for ES modules
@@ -22,18 +23,15 @@ export const uploadResume = async (req, res) => {
     status: "pending",
   });
 
+  let absolutePath;
+
   try {
-    // DEBUG — add these 4 lines
+    // DEBUG logs
     console.log("=== UPLOAD DEBUG ===");
     console.log("req.file:", req.file);
-    console.log("process.cwd():", process.cwd());
-    console.log(
-      "__dirname equivalent:",
-      path.join(path.dirname(fileURLToPath(import.meta.url))),
-    );
 
-    // ✅ Build absolute path — works on both Windows and Linux/Render
-    const absolutePath = path.isAbsolute(req.file.path)
+    // Resolve path (Render/Linux safe)
+    absolutePath = path.isAbsolute(req.file.path)
       ? req.file.path
       : path.join(process.cwd(), req.file.path);
 
@@ -45,22 +43,52 @@ export const uploadResume = async (req, res) => {
       throw new Error(`File not found at: ${absolutePath}`);
     }
 
-    // Read and encode to base64
-    const fileBuffer = fs.readFileSync(absolutePath);
-    const base64File = fileBuffer.toString("base64");
+    let mlResponse;
 
-    console.log("File size (bytes):", fileBuffer.length);
-    console.log("Sending to ML service:", req.file.originalname);
+    try {
+      // ===============================
+      // ✅ TRY BASE64 (existing flow)
+      // ===============================
+      console.log("⚡ Trying base64 ML request...");
 
-    const mlResponse = await axios.post(
-      `${process.env.ML_SERVICE_URL}/analyze`,
-      {
-        file_content: base64File,
-        file_name: req.file.originalname,
-      },
-      { timeout: 120000 },
-    );
+      const fileBuffer = fs.readFileSync(absolutePath);
+      const base64File = fileBuffer.toString("base64");
 
+      mlResponse = await axios.post(
+        `${process.env.ML_SERVICE_URL}/analyze`,
+        {
+          file_content: base64File,
+          file_name: req.file.originalname,
+        },
+        { timeout: 60000 }, // reduced timeout
+      );
+
+      console.log("✅ Base64 ML success");
+    } catch (base64Error) {
+      // ===============================
+      // 🔥 FALLBACK → FILE UPLOAD (mobile fix)
+      // ===============================
+      console.log("⚠️ Base64 failed → switching to upload...");
+      console.log("Error:", base64Error.message);
+
+      const formData = new FormData();
+      formData.append("file", fs.createReadStream(absolutePath));
+
+      mlResponse = await axios.post(
+        `${process.env.ML_SERVICE_URL}/analyze-upload`,
+        formData,
+        {
+          headers: formData.getHeaders(),
+          maxContentLength: Infinity,
+          maxBodyLength: Infinity,
+          timeout: 120000,
+        },
+      );
+
+      console.log("✅ Upload ML success");
+    }
+
+    // Save result
     resume.analysisResult = mlResponse.data;
     resume.status = "analyzed";
     await resume.save();
@@ -72,7 +100,7 @@ export const uploadResume = async (req, res) => {
       /* ignore */
     }
 
-    res.status(201).json({
+    return res.status(201).json({
       message: "Resume analyzed successfully",
       resume,
     });
@@ -80,9 +108,9 @@ export const uploadResume = async (req, res) => {
     resume.status = "failed";
     await resume.save();
 
-    console.log("Upload Error:", error.response?.data || error.message);
+    console.log("❌ Upload Error:", error.response?.data || error.message);
 
-    res.status(500).json({
+    return res.status(500).json({
       message: error.response?.data?.detail || error.message,
       error: error.response?.data?.detail || error.message,
     });
