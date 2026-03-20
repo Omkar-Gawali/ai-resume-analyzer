@@ -2,7 +2,7 @@ import axios from "axios";
 
 const API = axios.create({
   baseURL: process.env.REACT_APP_API_URL || "http://localhost:5000/api",
-  timeout: 120000, // ← 120 seconds — handles cold starts on mobile
+  timeout: 300000, // 5 minutes global timeout
 });
 
 API.interceptors.request.use((req) => {
@@ -18,7 +18,7 @@ export const loginUser = (data) => API.post("/auth/login", data);
 export const getMe = () => API.get("/auth/me");
 export const uploadResume = (form) =>
   API.post("/resume/upload", form, {
-    timeout: 180000, // ← 3 minutes specifically for upload
+    timeout: 300000,
   });
 export const getMyResumes = () => API.get("/resume");
 export const getResumeById = (id) => API.get(`/resume/${id}`);

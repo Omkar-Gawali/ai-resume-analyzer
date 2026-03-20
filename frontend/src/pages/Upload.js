@@ -12,14 +12,14 @@ import {
   Zap,
   Target,
 } from "lucide-react";
-import { uploadResume } from "../services/api";
+import { uploadResume, getResumeById } from "../services/api";
 
 export default function Upload() {
   const [file, setFile] = useState(null);
   const [dragging, setDragging] = useState(false);
   const [loading, setLoading] = useState(false);
   const [progress, setProgress] = useState(0);
-  const [debugError, setDebugError] = useState(""); // ← debug state
+  const [statusMsg, setStatusMsg] = useState("");
   const inputRef = useRef();
   const navigate = useNavigate();
 
@@ -29,12 +29,11 @@ export default function Upload() {
       toast.error("Only PDF files are allowed");
       return;
     }
-    if (f.size > 5 * 1024 * 1024) {
-      toast.error("File must be under 5MB");
+    if (f.size > 10 * 1024 * 1024) {
+      toast.error("File must be under 10MB");
       return;
     }
     setFile(f);
-    setDebugError(""); // clear previous error
   };
 
   const handleDrop = (e) => {
@@ -50,57 +49,58 @@ export default function Upload() {
     }
     setLoading(true);
     setProgress(0);
-    setDebugError("");
+    setStatusMsg("Uploading resume...");
 
     const iv = setInterval(
-      () => setProgress((p) => (p < 85 ? p + Math.random() * 12 : p)),
+      () => setProgress((p) => (p < 35 ? p + Math.random() * 6 : p)),
       400,
     );
 
     try {
       const form = new FormData();
       form.append("resume", file);
+
+      // ✅ Upload — returns immediately from backend
       const { data } = await uploadResume(form);
+      const resumeId = data.resume._id;
+
       clearInterval(iv);
+      setProgress(40);
+      setStatusMsg("Analyzing your resume...");
+
+      // ✅ Poll every 3 seconds until analyzed
+      let result = null;
+      for (let i = 0; i < 40; i++) {
+        await new Promise((r) => setTimeout(r, 3000));
+
+        const { data: resumeData } = await getResumeById(resumeId);
+
+        if (resumeData.status === "analyzed") {
+          result = resumeData;
+          break;
+        }
+        if (resumeData.status === "failed") {
+          throw new Error(resumeData.errorMessage || "Analysis failed");
+        }
+
+        // Update progress while polling
+        setProgress(40 + Math.min((i + 1) * 1.5, 55));
+        setStatusMsg(`Analyzing... (${(i + 1) * 3}s)`);
+      }
+
+      if (!result) throw new Error("Analysis timed out — please try again");
+
       setProgress(100);
+      setStatusMsg("Done!");
       toast.success("Resume analyzed successfully!");
-      setTimeout(() => navigate(`/results/${data.resume._id}`), 300);
+      setTimeout(() => navigate(`/results/${result._id}`), 300);
     } catch (err) {
       clearInterval(iv);
       setProgress(0);
-
-      // ── Build detailed debug info ──
-      const status = err?.response?.status ?? "NO_RESPONSE";
-      const code = err?.code ?? "NO_CODE";
-      const message = err?.response?.data?.message || err?.message || "unknown";
-      const url = err?.config?.url ?? "unknown url";
-      const method = err?.config?.method ?? "unknown method";
-
-      const debugMsg = [
-        `Status : ${status}`,
-        `Code   : ${code}`,
-        `Message: ${message}`,
-        `URL    : ${url}`,
-        `Method : ${method}`,
-      ].join("\n");
-
-      setDebugError(debugMsg); // ← show on screen
-
-      // ── User-facing toast ──
-      if (
-        code === "ECONNABORTED" ||
-        message.toLowerCase().includes("timeout")
-      ) {
-        toast.error("Server is waking up — wait 30s and try again", {
-          autoClose: 6000,
-        });
-      } else if (!err.response) {
-        toast.error(`Connection failed (${code}) — no response from server`, {
-          autoClose: 6000,
-        });
-      } else {
-        toast.error(message || "Upload failed");
-      }
+      setStatusMsg("");
+      const message =
+        err?.response?.data?.message || err?.message || "Upload failed";
+      toast.error(message);
     } finally {
       setLoading(false);
     }
@@ -337,7 +337,7 @@ export default function Upload() {
                     e.stopPropagation();
                     setFile(null);
                     setProgress(0);
-                    setDebugError("");
+                    setStatusMsg("");
                   }}
                   className="d-flex align-items-center justify-content-center border-0 flex-shrink-0"
                   style={{
@@ -398,7 +398,7 @@ export default function Upload() {
                   >
                     click to browse
                   </span>{" "}
-                  — PDF only, max 5MB
+                  — PDF only, max 10MB
                 </p>
               </div>
             )}
@@ -409,7 +409,7 @@ export default function Upload() {
             <div style={{ marginBottom: 20 }}>
               <div className="d-flex justify-content-between align-items-center mb-2">
                 <span style={{ fontSize: "0.8rem", color: "#7070a0" }}>
-                  Analyzing resume...
+                  {statusMsg}
                 </span>
                 <span
                   style={{
@@ -441,10 +441,10 @@ export default function Upload() {
               </div>
               <div className="d-flex gap-2 mt-3 flex-wrap">
                 {[
+                  "Uploading",
                   "Extracting text",
                   "Matching skills",
-                  "Scoring resume",
-                  "Finding job matches",
+                  "Scoring",
                 ].map((step, i) => (
                   <div
                     key={i}
@@ -562,7 +562,8 @@ export default function Upload() {
             )}
             {loading ? (
               <>
-                <span className="upload-spinner" /> Analyzing your resume...
+                <span className="upload-spinner" />{" "}
+                {statusMsg || "Processing..."}
               </>
             ) : file ? (
               <>
@@ -581,38 +582,9 @@ export default function Upload() {
             className="text-center mt-3 mb-0"
             style={{ fontSize: "0.75rem", color: "#353550" }}
           >
-            Max file size 5MB · PDF format only · Your data is never stored
+            Max file size 10MB · PDF format only · Your data is never stored
             permanently
           </p>
-
-          {/* ── DEBUG ERROR — visible on mobile screen ── */}
-          {debugError && (
-            <div
-              className="mt-4 p-3 rounded-3"
-              style={{
-                background: "rgba(244,63,94,0.08)",
-                border: "1px solid rgba(244,63,94,0.25)",
-                fontSize: "0.72rem",
-                color: "#f43f5e",
-                whiteSpace: "pre-wrap",
-                wordBreak: "break-all",
-                lineHeight: 1.8,
-                fontFamily: "monospace",
-              }}
-            >
-              <div
-                style={{
-                  fontWeight: 700,
-                  marginBottom: 6,
-                  fontSize: "0.75rem",
-                  letterSpacing: "0.05em",
-                }}
-              >
-                🔍 DEBUG INFO (share this)
-              </div>
-              {debugError}
-            </div>
-          )}
         </div>
       </div>
 
