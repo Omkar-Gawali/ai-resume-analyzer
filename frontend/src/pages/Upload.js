@@ -64,7 +64,25 @@ export default function Upload() {
     } catch (err) {
       clearInterval(iv);
       setProgress(0);
-      toast.error(err.response?.data?.message || "Upload failed");
+
+      // ← Better error messages for mobile users
+      const msg = err.response?.data?.message || err.message || "";
+
+      if (
+        err.code === "ECONNABORTED" ||
+        msg.toLowerCase().includes("timeout")
+      ) {
+        toast.error(
+          "Server is waking up — please wait 30 seconds and try again",
+          { autoClose: 6000 },
+        );
+      } else if (!err.response) {
+        toast.error("Connection failed — check your internet and try again", {
+          autoClose: 5000,
+        });
+      } else {
+        toast.error(msg || "Upload failed");
+      }
     } finally {
       setLoading(false);
     }
