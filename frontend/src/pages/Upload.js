@@ -19,6 +19,7 @@ export default function Upload() {
   const [dragging, setDragging] = useState(false);
   const [loading, setLoading] = useState(false);
   const [progress, setProgress] = useState(0);
+  const [debugError, setDebugError] = useState(""); // ← debug state
   const inputRef = useRef();
   const navigate = useNavigate();
 
@@ -33,6 +34,7 @@ export default function Upload() {
       return;
     }
     setFile(f);
+    setDebugError(""); // clear previous error
   };
 
   const handleDrop = (e) => {
@@ -48,11 +50,13 @@ export default function Upload() {
     }
     setLoading(true);
     setProgress(0);
-    // Fake progress for UX
+    setDebugError("");
+
     const iv = setInterval(
       () => setProgress((p) => (p < 85 ? p + Math.random() * 12 : p)),
       400,
     );
+
     try {
       const form = new FormData();
       form.append("resume", file);
@@ -65,23 +69,37 @@ export default function Upload() {
       clearInterval(iv);
       setProgress(0);
 
-      // ← Better error messages for mobile users
-      const msg = err.response?.data?.message || err.message || "";
+      // ── Build detailed debug info ──
+      const status = err?.response?.status ?? "NO_RESPONSE";
+      const code = err?.code ?? "NO_CODE";
+      const message = err?.response?.data?.message || err?.message || "unknown";
+      const url = err?.config?.url ?? "unknown url";
+      const method = err?.config?.method ?? "unknown method";
 
+      const debugMsg = [
+        `Status : ${status}`,
+        `Code   : ${code}`,
+        `Message: ${message}`,
+        `URL    : ${url}`,
+        `Method : ${method}`,
+      ].join("\n");
+
+      setDebugError(debugMsg); // ← show on screen
+
+      // ── User-facing toast ──
       if (
-        err.code === "ECONNABORTED" ||
-        msg.toLowerCase().includes("timeout")
+        code === "ECONNABORTED" ||
+        message.toLowerCase().includes("timeout")
       ) {
-        toast.error(
-          "Server is waking up — please wait 30 seconds and try again",
-          { autoClose: 6000 },
-        );
+        toast.error("Server is waking up — wait 30s and try again", {
+          autoClose: 6000,
+        });
       } else if (!err.response) {
-        toast.error("Connection failed — check your internet and try again", {
-          autoClose: 5000,
+        toast.error(`Connection failed (${code}) — no response from server`, {
+          autoClose: 6000,
         });
       } else {
-        toast.error(msg || "Upload failed");
+        toast.error(message || "Upload failed");
       }
     } finally {
       setLoading(false);
@@ -165,7 +183,7 @@ export default function Upload() {
         className="container position-relative py-5"
         style={{ zIndex: 1, maxWidth: 680 }}
       >
-        {/* ── Header ── */}
+        {/* Header */}
         <div className="text-center mb-5">
           <div
             className="d-inline-flex align-items-center gap-2 px-3 py-2 rounded-pill mb-3"
@@ -204,8 +222,6 @@ export default function Upload() {
             Upload your PDF and get instant AI-powered insights — skills, score,
             job matches
           </p>
-
-          {/* Feature chips */}
           <div className="d-flex align-items-center justify-content-center flex-wrap gap-3 mt-4">
             {features.map((f, i) => (
               <div
@@ -225,7 +241,7 @@ export default function Upload() {
           </div>
         </div>
 
-        {/* ── Main card ── */}
+        {/* Main card */}
         <div
           className="rounded-4 p-4 p-md-5"
           style={{
@@ -234,7 +250,7 @@ export default function Upload() {
             boxShadow: "0 24px 80px rgba(0,0,0,0.5)",
           }}
         >
-          {/* ── Drop zone ── */}
+          {/* Drop zone */}
           <div
             onClick={() => !file && inputRef.current.click()}
             onDragOver={(e) => {
@@ -271,12 +287,10 @@ export default function Upload() {
             />
 
             {file ? (
-              /* ── File selected state ── */
               <div
                 className="d-flex align-items-center gap-4 w-100"
                 style={{ maxWidth: 460, margin: "0 auto" }}
               >
-                {/* File icon */}
                 <div
                   className="d-flex align-items-center justify-content-center rounded-3 flex-shrink-0"
                   style={{
@@ -288,8 +302,6 @@ export default function Upload() {
                 >
                   <FileText size={26} color="#22d3a5" />
                 </div>
-
-                {/* File info */}
                 <div className="flex-grow-1 text-start" style={{ minWidth: 0 }}>
                   <div
                     style={{
@@ -320,13 +332,12 @@ export default function Upload() {
                     </span>
                   </div>
                 </div>
-
-                {/* Remove button */}
                 <button
                   onClick={(e) => {
                     e.stopPropagation();
                     setFile(null);
                     setProgress(0);
+                    setDebugError("");
                   }}
                   className="d-flex align-items-center justify-content-center border-0 flex-shrink-0"
                   style={{
@@ -336,20 +347,12 @@ export default function Upload() {
                     background: "rgba(244,63,94,0.08)",
                     color: "#f43f5e",
                     cursor: "pointer",
-                    transition: "all 0.2s",
                   }}
-                  onMouseEnter={(e) =>
-                    (e.currentTarget.style.background = "rgba(244,63,94,0.15)")
-                  }
-                  onMouseLeave={(e) =>
-                    (e.currentTarget.style.background = "rgba(244,63,94,0.08)")
-                  }
                 >
                   <X size={16} />
                 </button>
               </div>
             ) : (
-              /* ── Empty state ── */
               <div>
                 <div
                   className="d-flex align-items-center justify-content-center rounded-circle mx-auto mb-4"
@@ -366,7 +369,6 @@ export default function Upload() {
                   <UploadIcon
                     size={30}
                     color={dragging ? "#a78bfa" : "#454560"}
-                    style={{ transition: "color 0.25s" }}
                   />
                 </div>
                 <p
@@ -374,7 +376,6 @@ export default function Upload() {
                   style={{
                     fontSize: "1.05rem",
                     color: dragging ? "#a78bfa" : "#c0c0e0",
-                    transition: "color 0.25s",
                   }}
                 >
                   {dragging ? "Drop it here!" : "Drop your resume here"}
@@ -403,7 +404,7 @@ export default function Upload() {
             )}
           </div>
 
-          {/* ── Progress bar (visible during upload) ── */}
+          {/* Progress bar */}
           {loading && (
             <div style={{ marginBottom: 20 }}>
               <div className="d-flex justify-content-between align-items-center mb-2">
@@ -478,7 +479,7 @@ export default function Upload() {
             </div>
           )}
 
-          {/* ── Tips ── */}
+          {/* Tips */}
           {!loading && (
             <div
               className="rounded-3 p-3 mb-4"
@@ -524,7 +525,7 @@ export default function Upload() {
             </div>
           )}
 
-          {/* ── Submit button ── */}
+          {/* Submit button */}
           <button
             onClick={handleSubmit}
             disabled={!file || loading}
@@ -547,18 +548,6 @@ export default function Upload() {
               overflow: "hidden",
               fontFamily: "inherit",
             }}
-            onMouseEnter={(e) => {
-              if (file && !loading) {
-                e.currentTarget.style.transform = "translateY(-2px)";
-                e.currentTarget.style.boxShadow =
-                  "0 8px 36px rgba(108,99,255,0.45)";
-              }
-            }}
-            onMouseLeave={(e) => {
-              e.currentTarget.style.transform = "translateY(0)";
-              e.currentTarget.style.boxShadow =
-                file && !loading ? "0 4px 24px rgba(108,99,255,0.3)" : "none";
-            }}
           >
             {file && !loading && (
               <div
@@ -573,24 +562,21 @@ export default function Upload() {
             )}
             {loading ? (
               <>
-                <span className="upload-spinner" />
-                Analyzing your resume...
+                <span className="upload-spinner" /> Analyzing your resume...
               </>
             ) : file ? (
               <>
-                <UploadIcon size={19} strokeWidth={2} />
-                Analyze Resume
+                <UploadIcon size={19} strokeWidth={2} /> Analyze Resume{" "}
                 <ArrowRight size={17} strokeWidth={2.2} />
               </>
             ) : (
               <>
-                <UploadIcon size={19} strokeWidth={2} />
-                Select a PDF to continue
+                <UploadIcon size={19} strokeWidth={2} /> Select a PDF to
+                continue
               </>
             )}
           </button>
 
-          {/* File size note */}
           <p
             className="text-center mt-3 mb-0"
             style={{ fontSize: "0.75rem", color: "#353550" }}
@@ -598,6 +584,35 @@ export default function Upload() {
             Max file size 5MB · PDF format only · Your data is never stored
             permanently
           </p>
+
+          {/* ── DEBUG ERROR — visible on mobile screen ── */}
+          {debugError && (
+            <div
+              className="mt-4 p-3 rounded-3"
+              style={{
+                background: "rgba(244,63,94,0.08)",
+                border: "1px solid rgba(244,63,94,0.25)",
+                fontSize: "0.72rem",
+                color: "#f43f5e",
+                whiteSpace: "pre-wrap",
+                wordBreak: "break-all",
+                lineHeight: 1.8,
+                fontFamily: "monospace",
+              }}
+            >
+              <div
+                style={{
+                  fontWeight: 700,
+                  marginBottom: 6,
+                  fontSize: "0.75rem",
+                  letterSpacing: "0.05em",
+                }}
+              >
+                🔍 DEBUG INFO (share this)
+              </div>
+              {debugError}
+            </div>
+          )}
         </div>
       </div>
 
