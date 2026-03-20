@@ -26,10 +26,37 @@ connectDB();
 
 const app = express();
 
-app.use(cors());
-app.use(express.json());
+// ── CORS ───────────────────────────────────────────────────────
+const allowedOrigins = [
+  "http://localhost:3000",
+  "https://cvmind-ai.vercel.app",
+  "https://www.cvmind-ai.vercel.app",
+];
 
-// ── Routes ─────────────────────────────────────────────────────
+app.use(
+  cors({
+    origin: (origin, callback) => {
+      // Allow requests with no origin (mobile apps, curl, Postman)
+      if (!origin) return callback(null, true);
+      if (allowedOrigins.includes(origin)) return callback(null, true);
+      // Allow any vercel.app subdomain
+      if (origin.endsWith(".vercel.app")) return callback(null, true);
+      return callback(null, true); // ← allow all for now (safest for mobile)
+    },
+    credentials: true,
+    methods: ["GET", "POST", "PUT", "DELETE", "OPTIONS", "PATCH"],
+    allowedHeaders: ["Content-Type", "Authorization", "X-Requested-With"],
+    optionsSuccessStatus: 200, // ← fixes mobile preflight issues
+  }),
+);
+
+// ── Handle preflight requests ──────────────────────────────────
+app.options("*", cors());
+
+app.use(express.json({ limit: "50mb" }));
+app.use(express.urlencoded({ extended: true, limit: "50mb" }));
+
+// ── Routes ────────────────────────────────────────────────────
 app.use("/api/auth", authRoutes);
 app.use("/api/resume", resumeRoutes);
 
@@ -37,7 +64,7 @@ app.get("/", (req, res) => {
   res.json({ message: "AI Resume Analyzer API is running ✅" });
 });
 
-// ── Error handler (must be last) ───────────────────────────────
+// ── Error handler (must be last) ─────────────────────────────
 app.use(errorHandler);
 
 const PORT = process.env.PORT || 5000;
