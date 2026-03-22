@@ -61,7 +61,7 @@ export default function Register() {
     {
       key: "name",
       type: "text",
-      placeholder: "Omkar Gawali",
+      placeholder: "Enter Name",
       Icon: User,
       label: "Full name",
       ac: "name",
